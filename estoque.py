@@ -109,7 +109,7 @@ if arquivo_upload is not None:
                 "Unidade": st.column_config.TextColumn("Unidade", disabled=True, width="small"),
                 "Estoque Digital": st.column_config.NumberColumn("Estoque Digital (Sistema)", disabled=True, format="%.2f"),
                 "Estoque Físico": st.column_config.NumberColumn("Estoque Físico (Contado)", min_value=0.0, step=1.0, format="%.2f"),
-                "Observações": st.column_config.TextColumn("Observações / Motivo", placeholder="Opcional: Ex. Quebrado..."),
+                "Observações": st.column_config.TextColumn("Observações / Motivo", help="Opcional: Ex. Quebrado..."),
                 "Diferença": st.column_config.NumberColumn("Diferença", disabled=True, format="%+.2f"),
             },
             hide_index=True,
