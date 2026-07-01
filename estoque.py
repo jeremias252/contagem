@@ -6,7 +6,27 @@ import io
 st.set_page_config(page_title="Controle de Estoque - Caixa Tomada", layout="wide")
 
 # =========================================================================
-# 1. MEMÓRIA CENTRAL COMPARTILHADA (Sincroniza todos os aparelhos)
+# 0. BANCO DE COLABORADORES CADASTRADOS (CAIXA TOMADA)
+# =========================================================================
+USUARIOS_CADASTRADOS = {
+    # Coordenador (Acesso Total)
+    "jeremias": {"nome": "Jeremias", "senha": "admincaixa", "perfil": "Coordenador"},
+    
+    # Equipe (Conferentes)
+    "henrique": {"nome": "Henrique", "senha": "123", "perfil": "Equipe"},
+    "fran":     {"nome": "Fran", "senha": "123", "perfil": "Equipe"},
+    "leonardo": {"nome": "Leonardo", "senha": "123", "perfil": "Equipe"},
+    "patrick":  {"nome": "Patrick", "senha": "123", "perfil": "Equipe"},
+    "douglas":  {"nome": "Douglas", "senha": "123", "perfil": "Equipe"},
+    "fabiano":  {"nome": "Fabiano", "senha": "123", "perfil": "Equipe"},
+    "sergio":   {"nome": "Sérgio", "senha": "123", "perfil": "Equipe"},
+    "marcello": {"nome": "Marcello", "senha": "123", "perfil": "Equipe"},
+    "renan":    {"nome": "Renan", "senha": "123", "perfil": "Equipe"},
+    "gustavo":  {"nome": "Gustavo", "senha": "123", "perfil": "Equipe"}
+}
+
+# =========================================================================
+# 1. MEMÓRIA CENTRAL COMPARTILHADA
 # =========================================================================
 @st.cache_resource
 def obter_banco_central():
@@ -15,7 +35,7 @@ def obter_banco_central():
 banco_central = obter_banco_central()
 
 # =========================================================================
-# 2. TELA DE LOGIN E CONTROLE DE ACESSO
+# 2. TELA DE LOGIN INDIVIDUAL
 # =========================================================================
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -26,35 +46,22 @@ if "perfil" not in st.session_state:
 
 if not st.session_state.autenticado:
     st.title("🔐 Portal de Acesso - Caixa Tomada")
-    st.write("Identifique-se para iniciar a dupla contagem de inventário.")
+    st.write("Insira seu usuário e senha individuais para acessar o inventário.")
     
-    perfil = st.radio("Quem está acessando?", ["Equipe / Conferente", "Coordenador"])
+    usuario_input = st.text_input("Usuário (Login):", placeholder="Ex: jeremias")
+    senha_input = st.text_input("Senha:", type="password")
     
-    if perfil == "Coordenador":
-        senha = st.text_input("Senha Master do Coordenador:", type="password")
-        if st.button("Entrar como Coordenador"):
-            if senha == "admincaixa":
-                st.session_state.usuario = "Coordenador Geral"
-                st.session_state.perfil = "Coordenador"
-                st.session_state.autenticado = True
-                st.rerun()
-            else:
-                st.error("Senha do Coordenador incorreta!")
-                
-    else: # Equipe
-        nome_usuario = st.text_input("Seu Nome Completo:", placeholder="Ex: João Silva")
-        senha = st.text_input("Senha da Equipe:", type="password")
-        if st.button("Entrar para Contar"):
-            if nome_usuario.strip() == "":
-                st.warning("⚠️ Você precisa digitar seu nome para assinar suas contagens.")
-            elif senha == "caixatomada2026":
-                st.session_state.usuario = nome_usuario.strip().title()
-                st.session_state.perfil = "Equipe"
-                st.session_state.autenticado = True
-                st.rerun()
-            else:
-                st.error("Senha da Equipe incorreta!")
-                
+    if st.button("Entrar no Sistema", type="primary"):
+        login_limpo = usuario_input.strip().lower()
+        
+        if login_limpo in USUARIOS_CADASTRADOS and USUARIOS_CADASTRADOS[login_limpo]["senha"] == senha_input:
+            st.session_state.usuario = USUARIOS_CADASTRADOS[login_limpo]["nome"]
+            st.session_state.perfil = USUARIOS_CADASTRADOS[login_limpo]["perfil"]
+            st.session_state.autenticado = True
+            st.rerun()
+        else:
+            st.error("❌ Usuário ou senha incorretos! Verifique se digitou corretamente.")
+            
     st.stop()
 
 # =========================================================================
@@ -67,7 +74,6 @@ if st.session_state.perfil == "Coordenador":
 else:
     st.info(f"👤 Modo: **Conferente ({st.session_state.usuario})** | Preencha as contagens e lembre-se de clicar em Salvar no final.")
 
-# Função robusta de leitura do PDF
 def extrair_dados_pdf(arquivo_pdf):
     dados = []
     try:
@@ -133,11 +139,10 @@ if banco_central["df"] is None:
     st.stop()
 
 # =========================================================================
-# 4. ÁREA DE CONTAGEM COMPARTILHADA (SÓ EXECUTA SE HOUVER TABELA)
+# 4. ÁREA DE CONTAGEM COMPARTILHADA
 # =========================================================================
 df_mestre = banco_central["df"]
 
-# Calcula a situação em tempo real de cada item
 def calcular_status(row):
     if row["Contagem 1"] != row["Contagem 2"]:
         return "⚠️ Conflito (1 vs 2)"
@@ -148,13 +153,11 @@ def calcular_status(row):
 
 df_mestre["Status"] = df_mestre.apply(calcular_status, axis=1)
 
-# Indicadores Globais Dinâmicos
 total_itens = len(df_mestre)
 itens_corretos = len(df_mestre[df_mestre["Status"] == "✅ Bateu"])
 itens_conflito = len(df_mestre[df_mestre["Status"] == "⚠️ Conflito (1 vs 2)"])
 itens_divergentes = len(df_mestre[df_mestre["Status"] == "❌ Erro no Sistema"])
 
-# Progresso real calculado pelas assinaturas preenchidas
 total_contagens_esperadas = total_itens * 2
 contagens_feitas = df_mestre["Quem Contou 1"].str.strip().ne("").sum() + df_mestre["Quem Contou 2"].str.strip().ne("").sum()
 porcentagem = min(100, int((contagens_feitas / total_contagens_esperadas) * 100)) if total_contagens_esperadas > 0 else 0
@@ -172,7 +175,6 @@ m4.metric("❌ Divergentes", itens_divergentes)
 
 st.divider()
 
-# Barra de Pesquisa e Filtros Visuais
 st.subheader("🔍 Localizar Itens no Galpão")
 col_pesquisa, col_filtro = st.columns([2, 1])
 with col_pesquisa:
@@ -180,7 +182,6 @@ with col_pesquisa:
 with col_filtro:
     opcao_filtro = st.selectbox("Mostrar na tabela:", ["Todos os itens", "Apenas Conflitos", "Apenas Divergentes", "Apenas Corretos"])
 
-# Filtra a tabela de exibição preservando os índices originais do banco mestre
 df_exibicao = df_mestre.copy()
 
 if termo_busca:
@@ -194,7 +195,6 @@ elif opcao_filtro == "Apenas Corretos":
 
 st.info("🔒 Segurança Ativa: Colunas cinzas estão bloqueadas. Digite seus valores e use o botão 'Salvar' abaixo da tabela.")
 
-# Exibição segura da tabela interativa
 df_editado = st.data_editor(
     df_exibicao,
     column_config={
@@ -213,7 +213,7 @@ df_editado = st.data_editor(
 )
 
 # =========================================================================
-# BOTÃO DE SALVAMENTO SEGURO COM PROCESSAMENTO COMPLETO E TRAVAS
+# BOTÃO DE SALVAMENTO SEGURO
 # =========================================================================
 if st.button("💾 SALVAR E SINCRONIZAR CONTAGENS", type="primary", use_container_width=True):
     usuario_atual = st.session_state.usuario
@@ -227,7 +227,6 @@ if st.button("💾 SALVAR E SINCRONIZAR CONTAGENS", type="primary", use_containe
         dono_c1 = df_mestre.at[idx, "Quem Contou 1"]
         dono_c2 = df_mestre.at[idx, "Quem Contou 2"]
         
-        # Processa alterações na Contagem 1
         if row["Contagem 1"] != orig_c1:
             if dono_c1 != "" and dono_c1 != usuario_atual and not is_coordenador:
                 erros_travas.append(f"'{row['Produto'][:30]}...': Contagem 1 pertence a {dono_c1}.")
@@ -237,7 +236,6 @@ if st.button("💾 SALVAR E SINCRONIZAR CONTAGENS", type="primary", use_containe
                 banco_central["df"].at[idx, "Contagem 1"] = row["Contagem 1"]
                 banco_central["df"].at[idx, "Quem Contou 1"] = usuario_atual
                 
-        # Processa alterações na Contagem 2
         if row["Contagem 2"] != orig_c2:
             if dono_c2 != "" and dono_c2 != usuario_atual and not is_coordenador:
                 erros_travas.append(f"'{row['Produto'][:30]}...': Contagem 2 pertence a {dono_c2}.")
@@ -247,7 +245,6 @@ if st.button("💾 SALVAR E SINCRONIZAR CONTAGENS", type="primary", use_containe
                 banco_central["df"].at[idx, "Contagem 2"] = row["Contagem 2"]
                 banco_central["df"].at[idx, "Quem Contou 2"] = usuario_atual
                 
-        # Processa observações
         if row["Observações"] != orig_obs:
             banco_central["df"].at[idx, "Observações"] = row["Observações"]
 
@@ -255,7 +252,7 @@ if st.button("💾 SALVAR E SINCRONIZAR CONTAGENS", type="primary", use_containe
          st.warning(f"⚠️ Atenção: Há contagens com desvio maior que 50% em: {erros_gritantes[0][:40]}. Revise por segurança!")
 
     if erros_travas:
-        for err in erros_travas[:3]: # Mostra os 3 primeiros erros de trava
+        for err in erros_travas[:3]: 
             st.error(f"🔒 Alteração recusada em {err}")
         st.info("As demais linhas permitidas foram salvas. Recarregando dados...")
     else:
