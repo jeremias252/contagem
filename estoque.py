@@ -74,17 +74,27 @@ def extrair_dados_pdf(arquivo_pdf):
             for pagina in pdf.pages:
                 tabela = pagina.extract_table()
                 if tabela:
-                    for linha in tabela[1:]: 
-                        if len(linha) >= 6:
-                            estoque_str = str(linha[4]).replace('.', '').replace(',', '.') if linha[4] else "0"
+                    for linha in tabela[1:]: # Ignora o cabeçalho
+                        # Filtra e remove as colunas que estão totalmente vazias (None ou texto em branco)
+                        linha_limpa = [item for item in linha if item is not None and str(item).strip() != ""]
+                        
+                        # Se a linha limpa tiver pelo menos 3 informações (Produto, Estoque, Unidade)
+                        if len(linha_limpa) >= 3:
+                            # Sabemos que o Estoque é sempre a penúltima informação e a Unidade a última.
+                            # O Produto será a informação anterior ao Estoque.
+                            produto = linha_limpa[-3]
+                            estoque_bruto = linha_limpa[-2]
+                            unidade = linha_limpa[-1]
+
+                            estoque_str = str(estoque_bruto).replace('.', '').replace(',', '.')
                             try:
                                 estoque_digital = float(estoque_str)
                             except ValueError:
                                 estoque_digital = 0.0
 
                             dados.append({
-                                "Produto": linha[3] if linha[3] else "Sem Nome",
-                                "Unidade": linha[5] if linha[5] else "UN",
+                                "Produto": produto,
+                                "Unidade": unidade,
                                 "Estoque Digital": estoque_digital,
                                 "Contagem 1": estoque_digital, 
                                 "Quem Contou 1": "",
