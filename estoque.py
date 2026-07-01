@@ -165,4 +165,4 @@ st.divider()
 st.subheader("🔍 Filtros de Localização")
 col_pesquisa, col_filtro = st.columns([2, 1])
 with col_pesquisa:
-    termo_busca = st.text_
+    termo_busca = st.text_input("Buscar produto:", placeholder="Digite o nome do item...")
