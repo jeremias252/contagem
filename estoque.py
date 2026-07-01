@@ -6,11 +6,10 @@ import io
 st.set_page_config(page_title="Controle de Estoque - Caixa Tomada", layout="wide")
 
 # =========================================================================
-# 1. MEMÓRIA CENTRAL COMPARTILHADA (Sincroniza todos os celulares/PCs)
+# 1. MEMÓRIA CENTRAL COMPARTILHADA
 # =========================================================================
 @st.cache_resource
 def obter_banco_central():
-    # Este cofre de dados é compartilhado entre todos os usuários que acessam o site
     return {"df": None, "current_file": None, "alterados": set()}
 
 banco_central = obter_banco_central()
@@ -27,7 +26,7 @@ if "perfil" not in st.session_state:
 
 if not st.session_state.autenticado:
     st.title("🔐 Portal de Acesso - Caixa Tomada")
-    st.write("Identifique-se para acessar o sistema de inventário.")
+    st.write("Identifique-se para iniciar a dupla contagem de inventário.")
     
     perfil = st.radio("Quem está acessando?", ["Equipe / Conferente", "Coordenador"])
     
@@ -59,17 +58,15 @@ if not st.session_state.autenticado:
     st.stop()
 
 # =========================================================================
-# 3. INTERFACE DO SISTEMA (PÓS-LOGIN)
+# 3. INTERFACE DO SISTEMA
 # =========================================================================
-st.title("📦 Sistema de Contagem Cooperativo - Caixa Tomada")
+st.title("📦 Sistema de Dupla Contagem - Caixa Tomada")
 
-# Barra de status do usuário logado
 if st.session_state.perfil == "Coordenador":
-    st.success(f"👑 Modo: **{st.session_state.usuario}** | Você tem permissão para gerenciar arquivos e zerar o sistema.")
+    st.success(f"👑 Modo: **{st.session_state.usuario}** | Permissão total de gerenciamento.")
 else:
-    st.info(f"👤 Modo: **Conferente ({st.session_state.usuario})** | Suas contagens serão salvas com sua assinatura automaticamente.")
+    st.info(f"👤 Modo: **Conferente ({st.session_state.usuario})** | Suas alterações registrarão sua assinatura na respectiva contagem.")
 
-# Função de extração do PDF
 def extrair_dados_pdf(arquivo_pdf):
     dados = []
     try:
@@ -89,20 +86,19 @@ def extrair_dados_pdf(arquivo_pdf):
                                 "Produto": linha[3] if linha[3] else "Sem Nome",
                                 "Unidade": linha[5] if linha[5] else "UN",
                                 "Estoque Digital": estoque_digital,
-                                "Estoque Físico": estoque_digital, # Começa igual ao digital
-                                "Observações": "",
-                                "Conferente": ""
+                                "Contagem 1": estoque_digital, # Inicializa com o digital
+                                "Quem Contou 1": "",
+                                "Contagem 2": estoque_digital, # Inicializa com o digital
+                                "Quem Contou 2": "",
+                                "Observações": ""
                             })
     except Exception as e:
         st.error(f"Erro ao ler o PDF: {e}")
     return pd.DataFrame(dados)
 
-# -------------------------------------------------------------------------
-# PAINEL EXCLUSIVO DO COORDENADOR (UPLOAD E RESET)
-# -------------------------------------------------------------------------
+# PAINEL DO COORDENADOR
 if st.session_state.perfil == "Coordenador":
     st.subheader("⚙️ Painel de Controle do Coordenador")
-    
     col_up, col_reset = st.columns([3, 1])
     
     with col_up:
@@ -114,147 +110,141 @@ if st.session_state.perfil == "Coordenador":
                     banco_central["df"] = df_processado
                     banco_central["current_file"] = arquivo_upload.name
                     banco_central["alterados"] = set()
-                    st.success(f"✅ Arquivo '{arquivo_upload.name}' carregado e transmitido para a equipe!")
+                    st.success(f"✅ Arquivo '{arquivo_upload.name}' liberado para dupla contagem!")
                     st.rerun()
 
     with col_reset:
         st.write("---")
-        if st.button("🚨 ZERAR SISTEMA", help="Apaga o PDF atual e todas as contagens feitas pela equipe para iniciar um novo ano."):
+        if st.button("🚨 ZERAR SISTEMA"):
             banco_central["df"] = None
             banco_central["current_file"] = None
             banco_central["alterados"] = set()
-            st.warning("O estoque central foi resetado com sucesso!")
+            st.warning("O estoque central foi resetado!")
             st.rerun()
 
-# -------------------------------------------------------------------------
-# VERIFICAÇÃO DE DADOS CARREGADOS (BLOQUEIO PARA A EQUIPE)
-# -------------------------------------------------------------------------
 if banco_central["df"] is None:
     st.divider()
-    st.warning("⏳ **Aguardando Liberação:** O coordenador ainda não realizou o upload do relatório PDF do Greenapp. Por favor, aguarde para iniciar a contagem.")
+    st.warning("⏳ **Aguardando Liberação:** O coordenador ainda não carregou o relatório PDF do Greenapp.")
     st.stop()
 
 # =========================================================================
-# 4. ÁREA DE CONTAGEM COMPARTILHADA (Visível para todos pós-upload)
+# 4. ÁREA DE CONTAGEM COMPARTILHADA
 # =========================================================================
-# Sempre puxa os dados mais recentes do cofre central
 df_mestre = banco_central["df"]
-df_mestre["Diferença"] = df_mestre["Estoque Físico"] - df_mestre["Estoque Digital"]
 
-# Cálculos para o Dashboard e Progresso
+# Lógica de Status Inteligente para Dupla Contagem
+def calcular_status(row):
+    if row["Contagem 1"] != row["Contagem 2"]:
+        return "⚠️ Conflito de Contagem"
+    elif row["Contagem 1"] != row["Estoque Digital"]:
+        return "❌ Divergente do Sistema"
+    else:
+        return "✅ Bateu"
+
+df_mestre["Status"] = df_mestre.apply(calcular_status, axis=1)
+
 total_itens = len(df_mestre)
-itens_corretos = len(df_mestre[df_mestre["Diferença"] == 0])
-itens_divergentes = len(df_mestre[df_mestre["Diferença"] != 0])
+itens_corretos = len(df_mestre[df_mestre["Status"] == "✅ Bateu"])
+itens_conflito = len(df_mestre[df_mestre["Status"] == "⚠️ Conflito de Contagem"])
+itens_divergentes = len(df_mestre[df_mestre["Status"] == "❌ Divergente do Sistema"])
 itens_conferidos = len(banco_central["alterados"])
-porcentagem = min(100, int((itens_conferidos / total_itens) * 100)) if total_itens > 0 else 0
+porcentagem = min(100, int((itens_conferidos / (total_itens * 2)) * 100)) if total_itens > 0 else 0
 
-# Exibição do Progresso Geral da Empresa
-st.subheader(f"📈 Progresso Geral do Inventário: {porcentagem}% Concluído")
+st.subheader(f"📈 Progresso da Auditoria Global: {porcentagem}% Concluído")
 st.progress(porcentagem / 100)
-st.caption(f"Arquivo Atual: **{banco_central['current_file']}** | {itens_conferidos} de {total_itens} itens auditados pela equipe.")
+st.caption(f"Arquivo: **{banco_central['current_file']}** | {itens_conferidos} de {total_itens * 2} contagens totais realizadas.")
 
-# Métricas em tempo real
-st.subheader("📊 Números Atuais do Estoque")
-m1, m2, m3 = st.columns(3)
+st.subheader("📊 Resumo Estatístico do Inventário")
+m1, m2, m3, m4 = st.columns(4)
 m1.metric("Total de Produtos", total_itens)
-m2.metric("✅ Itens Batendo", itens_corretos)
-m3.metric("❌ Itens com Erro", itens_divergentes, delta=f"{itens_divergentes} correções" if itens_divergentes > 0 else None, delta_color="inverse")
+m2.metric("✅ 100% Corretos", itens_corretos)
+m3.metric("⚠️ Em Conflito (1 vs 2)", itens_conflito, delta=f"{itens_conflito} revisar" if itens_conflito > 0 else None, delta_color="off")
+m4.metric("❌ Erros no Sistema", itens_divergentes, delta=f"{itens_divergentes} ajustar" if itens_divergentes > 0 else None, delta_color="inverse")
 
 st.divider()
 
-# Barra de Pesquisa e Filtros Locais (Cada celular filtra o seu próprio visor)
-st.subheader("🔍 Localizar Itens no Galpão")
+# Filtros
+st.subheader("🔍 Filtros de Localização")
 col_pesquisa, col_filtro = st.columns([2, 1])
-
 with col_pesquisa:
-    termo_busca = st.text_input("Buscar produto pelo nome:", placeholder="Digite para filtrar na tela...")
+    termo_busca = st.text_input("Buscar produto:", placeholder="Digite o nome do item...")
 with col_filtro:
-    opcao_filtro = st.selectbox("Mostrar na tabela:", ["Todos os itens", "Apenas divergentes", "Apenas corretos"])
+    opcao_filtro = st.selectbox("Mostrar na tabela:", ["Todos os itens", "Apenas Conflitos (1 vs 2)", "Apenas Divergentes do Sistema", "Apenas Corretos"])
 
-# Prepara os dados para serem mostrados na tabela de acordo com a busca do usuário
 df_exibicao = df_mestre.copy()
 df_exibicao["ID_Original"] = df_exibicao.index
 
 if termo_busca:
     df_exibicao = df_exibicao[df_exibicao["Produto"].str.contains(termo_busca, case=False, na=False)]
-if opcao_filtro == "Apenas divergentes":
-    df_exibicao = df_exibicao[df_exibicao["Diferença"] != 0]
-elif opcao_filtro == "Apenas corretos":
-    df_exibicao = df_exibicao[df_exibicao["Diferença"] == 0]
+if opcao_filtro == "Apenas Conflitos (1 vs 2)":
+    df_exibicao = df_exibicao[df_exibicao["Status"] == "⚠️ Conflito de Contagem"]
+elif opcao_filtro == "Apenas Divergentes do Sistema":
+    df_exibicao = df_exibicao[df_exibicao["Status"] == "❌ Divergente do Sistema"]
+elif opcao_filtro == "Apenas Corretos":
+    df_exibicao = df_exibicao[df_exibicao["Status"] == "✅ Bateu"]
 
-# Alerta de Dedo Gordo
-erros_gritantes = []
-for idx, row in df_mestre.iterrows():
-    dig = row["Estoque Digital"]
-    fis = row["Estoque Físico"]
-    if dig > 0 and fis != dig:
-        if (abs(fis - dig) / dig) >= 0.50:
-            erros_gritantes.append(row["Produto"])
+st.info("💡 **Como Funciona:** Insira sua contagem na coluna 'Contagem 1' ou 'Contagem 2'. O sistema assinará seu nome na coluna ao lado automaticamente assim que você alterar o número.")
 
-if erros_gritantes:
-    st.error(f"⚠️ **Alerta de Revisão:** Detectamos valores muito suspeitos (variação acima de 50%) no item: '{erros_gritantes[0][:45]}...'. Alguém pode ter digitado errado!")
-
-st.info("🔒 Segurança Ativa: Colunas cinzas estão bloqueadas. Altere apenas o 'Estoque Físico' e as 'Observações'.")
-
-# Tabela Interativa
+# Exibição da Tabela com Dupla Contagem
 df_editado = st.data_editor(
     df_exibicao,
     column_config={
         "Produto": st.column_config.TextColumn("Produto", disabled=True, width="large"),
         "Unidade": st.column_config.TextColumn("Unidade", disabled=True, width="small"),
         "Estoque Digital": st.column_config.NumberColumn("Digital (Greenapp)", disabled=True, format="%.2f"),
-        "Estoque Físico": st.column_config.NumberColumn("Físico (Contado)", min_value=0.0, step=1.0, format="%.2f"),
-        "Observações": st.column_config.TextColumn("Observações / Motivo", help="Digite justificativas aqui."),
-        "Diferença": st.column_config.NumberColumn("Diferença", disabled=True, format="%+.2f"),
-        "Conferente": st.column_config.TextColumn("Responsável", disabled=True),
+        "Contagem 1": st.column_config.NumberColumn("Contagem 1", min_value=0.0, step=1.0, format="%.2f"),
+        "Quem Contou 1": st.column_config.TextColumn("Quem Contou 1", disabled=True),
+        "Contagem 2": st.column_config.NumberColumn("Contagem 2", min_value=0.0, step=1.0, format="%.2f"),
+        "Quem Contou 2": st.column_config.TextColumn("Quem Contou 2", disabled=True),
+        "Observações": st.column_config.TextColumn("Observações / Motivo"),
+        "Status": st.column_config.TextColumn("Situação Atual", disabled=True),
         "ID_Original": None
     },
     hide_index=True,
     use_container_width=True
 )
 
-# SALVAMENTO INTELIGENTE (Salva na memória central apenas o que a pessoa alterou no seu visor)
+# SALVAMENTO E ASSINATURA AUTOMÁTICA POR COLUNA
 for idx, row in df_editado.iterrows():
     id_real = row["ID_Original"]
     
-    # Verifica se o valor digitado agora é diferente do que está gravado no banco mestre
-    mudou_fisico = row["Estoque Físico"] != df_mestre.at[id_real, "Estoque Físico"]
+    mudou_c1 = row["Contagem 1"] != df_mestre.at[id_real, "Contagem 1"]
+    mudou_c2 = row["Contagem 2"] != df_mestre.at[id_real, "Contagem 2"]
     mudou_obs = row["Observações"] != df_mestre.at[id_real, "Observações"]
     
-    if mudou_fisico or mudou_obs:
-        # Atualiza a célula global
-        banco_central["df"].at[id_real, "Estoque Físico"] = row["Estoque Físico"]
+    if mudou_c1 or mudou_c2 or mudou_obs:
+        banco_central["df"].at[id_real, "Contagem 1"] = row["Contagem 1"]
+        banco_central["df"].at[id_real, "Contagem 2"] = row["Contagem 2"]
         banco_central["df"].at[id_real, "Observações"] = row["Observações"]
         
-        # Carimba a assinatura de quem está logado nesta sessão!
-        banco_central["df"].at[id_real, "Conferente"] = st.session_state.usuario
-        banco_central["alterados"].add(id_real)
-        
-        # Recarrega a página para atualizar as métricas globais e a tabela de todo mundo
+        if mudou_c1:
+            banco_central["df"].at[id_real, "Quem Contou 1"] = st.session_state.usuario
+            banco_central["alterados"].add(f"{id_real}_c1")
+        if mudou_c2:
+            banco_central["df"].at[id_real, "Quem Contou 2"] = st.session_state.usuario
+            banco_central["alterados"].add(f"{id_real}_c2")
+            
         st.rerun()
 
-# -------------------------------------------------------------------------
-# DOWNLOAD DO RELATÓRIO FINAL (Disponível para todos, mas focado no Coordenador)
-# -------------------------------------------------------------------------
+# RELATÓRIO EXCEL CONSOLIDADO
 st.divider()
-st.subheader("📋 Relatório consolidado para Ajuste no Greenapp")
-divergencias = df_mestre[df_mestre["Diferença"] != 0]
+st.subheader("📋 Relatório Consolidado de Auditoria (Excel)")
+erros_e_conflitos = df_mestre[df_mestre["Status"] != "✅ Bateu"]
 
-if divergencias.empty:
-    st.success("Estoque perfeito! Nenhuma divergência registrada até o momento.")
+if erros_e_conflitos.empty:
+    st.success("Nenhum erro ou conflito detectado no momento!")
 else:
-    st.warning(f"Existem {len(divergencias)} itens com divergência aguardando correção.")
-    
-    df_relatorio = divergencias[["Produto", "Unidade", "Estoque Digital", "Estoque Físico", "Diferença", "Observações", "Conferente"]]
+    st.warning(f"Existem {len(erros_e_conflitos)} itens que possuem conflito de contagem ou erro em relação ao Greenapp.")
+    df_relatorio = erros_e_conflitos[["Produto", "Unidade", "Estoque Digital", "Contagem 1", "Quem Contou 1", "Contagem 2", "Quem Contou 2", "Status", "Observações"]]
     st.dataframe(df_relatorio, hide_index=True, use_container_width=True)
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df_relatorio.to_excel(writer, index=False, sheet_name="Ajustes de Estoque")
+        df_relatorio.to_excel(writer, index=False, sheet_name="Relatório de Auditoria")
     
     st.download_button(
-        label="📥 Baixar Planilha Consolidada com Assinaturas (.xlsx)",
+        label="📥 Baixar Planilha de Erros e Conflitos (.xlsx)",
         data=buffer.getvalue(),
-        file_name="ajustes_estoque_caixatomada_final.xlsx",
+        file_name="auditoria_estoque_caixatomada.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
