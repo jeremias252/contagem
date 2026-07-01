@@ -63,9 +63,9 @@ if not st.session_state.autenticado:
 st.title("📦 Sistema de Dupla Contagem - Caixa Tomada")
 
 if st.session_state.perfil == "Coordenador":
-    st.success(f"👑 Modo: **{st.session_state.usuario}** | Permissão total de gerenciamento.")
+    st.success(f"👑 Modo: **{st.session_state.usuario}** | Permissão total para editar e gerenciar qualquer contagem.")
 else:
-    st.info(f"👤 Modo: **Conferente ({st.session_state.usuario})** | Suas alterações registrarão sua assinatura na respectiva contagem.")
+    st.info(f"👤 Modo: **Conferente ({st.session_state.usuario})** | Você só pode editar as suas próprias contagens.")
 
 def extrair_dados_pdf(arquivo_pdf):
     dados = []
@@ -86,9 +86,9 @@ def extrair_dados_pdf(arquivo_pdf):
                                 "Produto": linha[3] if linha[3] else "Sem Nome",
                                 "Unidade": linha[5] if linha[5] else "UN",
                                 "Estoque Digital": estoque_digital,
-                                "Contagem 1": estoque_digital, # Inicializa com o digital
+                                "Contagem 1": estoque_digital, 
                                 "Quem Contou 1": "",
-                                "Contagem 2": estoque_digital, # Inicializa com o digital
+                                "Contagem 2": estoque_digital, 
                                 "Quem Contou 2": "",
                                 "Observações": ""
                             })
@@ -132,7 +132,6 @@ if banco_central["df"] is None:
 # =========================================================================
 df_mestre = banco_central["df"]
 
-# Lógica de Status Inteligente para Dupla Contagem
 def calcular_status(row):
     if row["Contagem 1"] != row["Contagem 2"]:
         return "⚠️ Conflito de Contagem"
@@ -163,88 +162,7 @@ m4.metric("❌ Erros no Sistema", itens_divergentes, delta=f"{itens_divergentes}
 
 st.divider()
 
-# Filtros
 st.subheader("🔍 Filtros de Localização")
 col_pesquisa, col_filtro = st.columns([2, 1])
 with col_pesquisa:
-    termo_busca = st.text_input("Buscar produto:", placeholder="Digite o nome do item...")
-with col_filtro:
-    opcao_filtro = st.selectbox("Mostrar na tabela:", ["Todos os itens", "Apenas Conflitos (1 vs 2)", "Apenas Divergentes do Sistema", "Apenas Corretos"])
-
-df_exibicao = df_mestre.copy()
-df_exibicao["ID_Original"] = df_exibicao.index
-
-if termo_busca:
-    df_exibicao = df_exibicao[df_exibicao["Produto"].str.contains(termo_busca, case=False, na=False)]
-if opcao_filtro == "Apenas Conflitos (1 vs 2)":
-    df_exibicao = df_exibicao[df_exibicao["Status"] == "⚠️ Conflito de Contagem"]
-elif opcao_filtro == "Apenas Divergentes do Sistema":
-    df_exibicao = df_exibicao[df_exibicao["Status"] == "❌ Divergente do Sistema"]
-elif opcao_filtro == "Apenas Corretos":
-    df_exibicao = df_exibicao[df_exibicao["Status"] == "✅ Bateu"]
-
-st.info("💡 **Como Funciona:** Insira sua contagem na coluna 'Contagem 1' ou 'Contagem 2'. O sistema assinará seu nome na coluna ao lado automaticamente assim que você alterar o número.")
-
-# Exibição da Tabela com Dupla Contagem
-df_editado = st.data_editor(
-    df_exibicao,
-    column_config={
-        "Produto": st.column_config.TextColumn("Produto", disabled=True, width="large"),
-        "Unidade": st.column_config.TextColumn("Unidade", disabled=True, width="small"),
-        "Estoque Digital": st.column_config.NumberColumn("Digital (Greenapp)", disabled=True, format="%.2f"),
-        "Contagem 1": st.column_config.NumberColumn("Contagem 1", min_value=0.0, step=1.0, format="%.2f"),
-        "Quem Contou 1": st.column_config.TextColumn("Quem Contou 1", disabled=True),
-        "Contagem 2": st.column_config.NumberColumn("Contagem 2", min_value=0.0, step=1.0, format="%.2f"),
-        "Quem Contou 2": st.column_config.TextColumn("Quem Contou 2", disabled=True),
-        "Observações": st.column_config.TextColumn("Observações / Motivo"),
-        "Status": st.column_config.TextColumn("Situação Atual", disabled=True),
-        "ID_Original": None
-    },
-    hide_index=True,
-    use_container_width=True
-)
-
-# SALVAMENTO E ASSINATURA AUTOMÁTICA POR COLUNA
-for idx, row in df_editado.iterrows():
-    id_real = row["ID_Original"]
-    
-    mudou_c1 = row["Contagem 1"] != df_mestre.at[id_real, "Contagem 1"]
-    mudou_c2 = row["Contagem 2"] != df_mestre.at[id_real, "Contagem 2"]
-    mudou_obs = row["Observações"] != df_mestre.at[id_real, "Observações"]
-    
-    if mudou_c1 or mudou_c2 or mudou_obs:
-        banco_central["df"].at[id_real, "Contagem 1"] = row["Contagem 1"]
-        banco_central["df"].at[id_real, "Contagem 2"] = row["Contagem 2"]
-        banco_central["df"].at[id_real, "Observações"] = row["Observações"]
-        
-        if mudou_c1:
-            banco_central["df"].at[id_real, "Quem Contou 1"] = st.session_state.usuario
-            banco_central["alterados"].add(f"{id_real}_c1")
-        if mudou_c2:
-            banco_central["df"].at[id_real, "Quem Contou 2"] = st.session_state.usuario
-            banco_central["alterados"].add(f"{id_real}_c2")
-            
-        st.rerun()
-
-# RELATÓRIO EXCEL CONSOLIDADO
-st.divider()
-st.subheader("📋 Relatório Consolidado de Auditoria (Excel)")
-erros_e_conflitos = df_mestre[df_mestre["Status"] != "✅ Bateu"]
-
-if erros_e_conflitos.empty:
-    st.success("Nenhum erro ou conflito detectado no momento!")
-else:
-    st.warning(f"Existem {len(erros_e_conflitos)} itens que possuem conflito de contagem ou erro em relação ao Greenapp.")
-    df_relatorio = erros_e_conflitos[["Produto", "Unidade", "Estoque Digital", "Contagem 1", "Quem Contou 1", "Contagem 2", "Quem Contou 2", "Status", "Observações"]]
-    st.dataframe(df_relatorio, hide_index=True, use_container_width=True)
-
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df_relatorio.to_excel(writer, index=False, sheet_name="Relatório de Auditoria")
-    
-    st.download_button(
-        label="📥 Baixar Planilha de Erros e Conflitos (.xlsx)",
-        data=buffer.getvalue(),
-        file_name="auditoria_estoque_caixatomada.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    termo_busca = st.text_
